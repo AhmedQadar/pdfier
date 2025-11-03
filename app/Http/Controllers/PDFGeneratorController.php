@@ -2,140 +2,158 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Document;
+use App\Models\File;
 use PhpOffice\PhpWord\TemplateProcessor;
-use PhpOffice\PhpWord\IOFactory;
 use Illuminate\Http\Request;
-use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Storage;
+use NumberFormatter;
 
 class PDFGeneratorController extends Controller
 {
     /**
-     * Display a listing of documents.
+     * Show the home page with available templates.
      */
     public function index()
     {
-        $documents = Document::all();
-        return view('documents.index', compact('documents'));
+        $templatePath = storage_path('app/templates/');
+        $templates = glob($templatePath . '*.docx'); // Get all .docx files
+
+        return view('documents.index', compact('templates'));
     }
 
     /**
-     * Show form for uploading a new template.
+     * Show the form for filling a selected template.
      */
-    public function create()
+    public function edit($id)
     {
-        return view('documents.create');
-    }
+        $templatePath = storage_path('app/templates/');
+        $templates = glob($templatePath . '*.docx');
 
-    /**
-     * Store a new document template.
-     */
-    public function store(Request $request)
-    {
-        $request->validate([
-            'template' => 'required|file|mimes:docx',
-            'name' => 'required|string|max:255',
-        ]);
+        if (!isset($templates[$id])) {
+            abort(404, "Template not found.");
+        }
 
-        // Store uploaded template in storage/app/templates
-        $templatePath = $request->file('template')->store('templates', 'local');
+        $filename = basename($templates[$id]);
 
-        // Save document details to the database
-        Document::create([
-            'name' => $request->name,
-            'template_path' => $templatePath,
-            'status' => 'ready'
-        ]);
-
-        return redirect()->route('documents.index')->with('success', 'Template uploaded successfully');
-    }
-
-    /**
-     * Show form for generating a document.
-     */
-    public function show(Document $document)
-    {
-        return view('documents.show', compact('document'));
-    }
-
-    public function edit(Document $document)
-    {
-        // Assuming templates are stored in 'storage/app/templates'
-        $templates = Document::all(); // Fetch all templates (modify if needed)
-
-        return view('documents.fill', compact('document', 'templates'));
-    }
-    public function generate(Request $request, Document $document)
-    {
-        try {
-            // Validate form inputs
-            $request->validate([
-                'orderNo' => 'required|string',
-                'LPOno' => 'required|string',
-                'date' => 'required|date',
-                'LoadLoc' => 'required|string',
-                'quantity' => 'required|string',
-                'product' => 'required|string',
-                'customername' => 'required|string',
-                'paymentterms' => 'required|string',
-                'adress' => 'required|string',
-                'destination' => 'required|string',
-                'registration' => 'required|string',
-                'transporter' => 'required|string',
-                'comp1' => 'nullable|string',
-                'comp2' => 'nullable|string',
-                'comp3' => 'nullable|string',
-                'comp4' => 'nullable|string',
-                'comp5' => 'nullable|string',
-                'comp6' => 'nullable|string',
-                'kraentryno' => 'required|string',
-                'bookingno' => 'required|string',
-            ]);
-
-            // Load template
-            $templatePath = storage_path('app/' . $document->template_path);
-            $templateProcessor = new \PhpOffice\PhpWord\TemplateProcessor($templatePath);
-
-            // Replace placeholders with user inputs
-            $templateProcessor->setValue('orderNo', $request->orderNo);
-            $templateProcessor->setValue('LPOno', $request->LPOno);
-            $templateProcessor->setValue('date', $request->date);
-            $templateProcessor->setValue('LoadLoc', $request->LoadLoc);
-            $templateProcessor->setValue('quantity', $request->quantity);
-            $templateProcessor->setValue('product', $request->product);
-            $templateProcessor->setValue('customername', $request->customername);
-            $templateProcessor->setValue('paymentterms', $request->paymentterms);
-            $templateProcessor->setValue('adress', $request->adress);
-            $templateProcessor->setValue('destination', $request->destination);
-            $templateProcessor->setValue('registration', $request->registration);
-            $templateProcessor->setValue('transporter', $request->transporter);
-            $templateProcessor->setValue('comp1', $request->comp1);
-            $templateProcessor->setValue('comp2', $request->comp2);
-            $templateProcessor->setValue('comp3', $request->comp3);
-            $templateProcessor->setValue('comp4', $request->comp4);
-            $templateProcessor->setValue('comp5', $request->comp5);
-            $templateProcessor->setValue('comp6', $request->comp6);
-            $templateProcessor->setValue('kraentryno', $request->kraentryno);
-            $templateProcessor->setValue('bookingno', $request->bookingno);
-
-            // Save the updated document
-            $outputPath = storage_path('app/temp/' . uniqid() . '.docx');
-            $templateProcessor->saveAs($outputPath);
-
-            // Convert to PDF (Optional)
-            $pdfPath = storage_path('app/temp/' . uniqid() . '.pdf');
-            $htmlContent = "<h1>Loading Order</h1><p>Order Number: " . $request->orderNo . "</p>";
-            
-            $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadHTML($htmlContent);
-            $pdf->save($pdfPath);
-
-            // Return file for download
-            return response()->download($outputPath)->deleteFileAfterSend(true);
-
-        } catch (\Exception $e) {
-            return back()->with('error', 'Failed to generate document: ' . $e->getMessage());
+        if (str_contains($filename, 'payment_instruction')) {
+            return view('documents.payment_instruction', compact('filename', 'id'));
+        } elseif (str_contains($filename, 'loading_order')) {
+            return view('documents.loading_order', compact('filename', 'id'));
+        } elseif (str_contains($filename, 'local_invoice')) { 
+            return view('documents.local_invoice', compact('filename', 'id'));
+        } else {
+            return view('documents.fill', compact('filename', 'id'));
         }
     }
 
+    /**
+     * Generate PDF from the filled template.
+     */
+    public function generate(Request $request, $id)
+    {
+        $templatePath = storage_path('app/templates/');
+        $templates = glob($templatePath . '*.docx');
+
+        if (!isset($templates[$id])) {
+            return back()->with('error', 'Template not found.');
+        }
+
+        $templateFile = $templates[$id];
+
+        try {
+            $templateProcessor = new TemplateProcessor($templateFile);
+            $variables = $templateProcessor->getVariables();
+
+            $total = 0;
+            $formatter = new NumberFormatter("en", NumberFormatter::SPELLOUT);
+
+            for ($i = 1; $i <= 2; $i++) {
+                $vol = (float) $request->input('vol' . $i, 0);
+                $rate = 0;
+                if ($request->input('item' . $i) == 'AGO') {
+                    $rate = 154;
+                } elseif ($request->input('item' . $i) == 'PMS') {
+                    $rate = 164;
+                }
+
+                $amount = $vol * $rate;
+                $request->merge([
+                    'rate' . $i => number_format($rate, 2, '.', ','),
+                    'amount' . $i => number_format($amount, 2, '.', ',')
+                ]);
+
+                $total += $amount;
+            }
+
+            // Get the formatted number in words
+            $wordsRaw = $formatter->format($total);
+            
+            // Function to properly format large numbers with "and" in the correct places
+            $formattedWords = $this->formatNumberWords($total);
+            
+            $request->merge([
+                'total' => number_format($total, 2, '.', ','),
+                'total_in_words' => $formattedWords
+            ]);
+
+            foreach ($variables as $variable) {
+                $templateProcessor->setValue($variable, $request->input($variable, ''));
+            }
+
+            $docxFile = storage_path('app/temp/' . uniqid() . '.docx');
+            $templateProcessor->saveAs($docxFile);
+
+            $pdfFile = str_replace('.docx', '.pdf', $docxFile);
+            $libreOfficePath = '"C:\\Program Files\\LibreOffice\\program\\soffice.exe"';
+            $command = "$libreOfficePath --headless --convert-to pdf " . escapeshellarg($docxFile) . " --outdir " . escapeshellarg(dirname($pdfFile));
+            shell_exec($command);
+
+            if (!file_exists($pdfFile)) {
+                return back()->with('error', 'PDF generation failed.');
+            }
+
+            unlink($docxFile);
+
+            return response()->download($pdfFile)->deleteFileAfterSend(true);
+        } catch (\Exception $e) {
+            return back()->with('error', 'Failed to generate PDF: ' . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Format a number into words with proper capitalization and "and" placement
+     */
+    private function formatNumberWords($number)
+    {
+        $formatter = new NumberFormatter("en", NumberFormatter::SPELLOUT);
+        
+        // Get the basic word format
+        $words = $formatter->format($number);
+        
+        // Replace hyphens and commas with spaces for consistent formatting
+        $words = str_replace(['-', ','], ' ', $words);
+        
+        // Handle decimal part if present
+        $parts = explode('point', $words);
+        $wholeNumber = trim($parts[0]);
+        
+        // Insert "and" at appropriate places for whole numbers
+        // For numbers > 100, insert "and" after the hundreds/thousands/millions place
+        $patterns = [
+            '/\b(hundred|thousand|million|billion|trillion)\b(?!\s+and\b)(?=\s+\w+)/' => '$1 And',
+        ];
+        
+        $wholeNumber = preg_replace(array_keys($patterns), array_values($patterns), $wholeNumber);
+        
+        // Capitalize each word
+        $words = ucwords($wholeNumber);
+        
+        // Handle the decimal part if exists
+        if (isset($parts[1])) {
+            $decimal = ucwords(trim($parts[1]));
+            $words .= ' Point ' . $decimal;
+        }
+        
+        return $words;
+    }
 }

@@ -2,19 +2,12 @@
 
 use App\Http\Controllers\PDFGeneratorController;
 
-// List all documents
-Route::get('/documents', [PDFGeneratorController::class, 'index'])->name('documents.index');
 
-// Show the form to upload a new template
-Route::get('/documents/create', [PDFGeneratorController::class, 'create'])->name('documents.create');
+// Home Page - Show templates
+Route::get('/', [PDFGeneratorController::class, 'index'])->name('documents.index');
 
-// Handle the form submission for template upload
-Route::post('/documents', [PDFGeneratorController::class, 'store'])->name('documents.store');
+// Fill a template
+Route::get('/documents/{id}/fill', [PDFGeneratorController::class, 'edit'])->name('documents.fill');
 
-// Show a document and form for filling fields
-Route::get('documents/{document}/fill', [PDFGeneratorController::class, 'edit'])->name('documents.fill');
-
-// Generate a PDF from the template with user input
-Route::post('documents/{document}/generate', [PDFGeneratorController::class, 'generate'])->name('documents.generate');
-
-Route::get('/', [PDFGeneratorController::class, 'index']);
+// Generate PDF
+Route::post('/documents/{id}/generate', [PDFGeneratorController::class, 'generate'])->name('documents.generate');
